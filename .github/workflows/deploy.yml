@@ -1,19 +1,19 @@
-name: CI to AWS ECR
+name: CI/CD Pipeline (Auto Deploy)
 
 on:
   push:
     branches: [ "main" ]
 
+# 💡 GitOps 핵심: GitHub Actions이 Git에 다시 커밋(수정)할 수 있도록 권한 부여
 permissions:
-  id-token: write
-  contents: read
+  contents: write 
 
 env:
   AWS_REGION: ap-northeast-2
-  # 님이 알려주신 ECR 주소입니다
   ECR_REPOSITORY: petclinic-app
-  # 주소 앞부분 (레지스트리 주소)
+  # 님의 ECR 주소 (수정 불필요)
   ECR_REGISTRY: 639242342449.dkr.ecr.ap-northeast-2.amazonaws.com
+  IMAGE_TAG: ${{ github.sha }} # ✅ 이미지 태그를 현재 Git Commit SHA(고유값)로 정의
 
 jobs:
   build-and-push:
@@ -22,43 +22,43 @@ jobs:
     - name: Checkout code
       uses: actions/checkout@v3
 
-    # 1. 자바(JDK 17) 세팅
-    - name: Set up JDK 17
-      uses: actions/setup-java@v3
-      with:
-        java-version: '17'
-        distribution: 'temurin'
-        cache: maven
-
-    # 2. Maven 빌드 (JAR 파일 생성) - 테스트는 건너뜀
-    - name: Build with Maven
-      run: |
-        chmod +x mvnw
-        ./mvnw clean package -DskipTests
-
-    # 3. AWS 자격 증명 설정 (Secrets 사용)
-    - name: Configure AWS credentials
+    # AWS 로그인
+    - name: Configure AWS and Login to ECR
       uses: aws-actions/configure-aws-credentials@v4
       with:
         aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
         aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
         aws-region: ${{ env.AWS_REGION }}
-
-    # 4. Amazon ECR 로그인
-    - name: Login to Amazon ECR
-      id: login-ecr
-      uses: aws-actions/amazon-ecr-login@v2
-
-    # 5. 도커 이미지 빌드 및 푸시 (태그는 현재 시간 + 커밋해시)
+    - uses: aws-actions/amazon-ecr-login@v2
+    
+    # 1. 빌드 및 ECR 업로드 (SHA 태그 사용)
     - name: Build, tag, and push image to Amazon ECR
-      id: build-image
-      env:
-        IMAGE_TAG: ${{ github.sha }}
       run: |
-        # 도커 빌드
-        docker build -t $ECR_REGISTRY/$ECR_REPOSITORY:latest .
+        chmod +x mvnw
+        ./mvnw clean package -DskipTests
         
-        # ECR로 푸시
+        # SHA 태그로 빌드 및 푸시 (ArgoCD가 쓸 것)
+        docker build -t $ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG .
+        docker push $ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG
+        
+        # (선택) latest 태그도 그냥 업데이트 해둠
+        docker tag $ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG $ECR_REGISTRY/$ECR_REPOSITORY:latest
         docker push $ECR_REGISTRY/$ECR_REPOSITORY:latest
+
+    # 2. K8s YAML 파일 수정 (여기가 자동 배포의 핵심!)
+    # sed 명령어로 YAML 파일 안의 이미지 태그 부분을 찾아내서 이번 SHA 태그로 바꿔치기 합니다.
+    - name: Update Deployment YAML with new image tag
+      run: |
+        WAS_YAML_PATH="k8s/was-deployment.yaml"
+        # :뒤에 오는 태그가 무엇이든 간에, 새로운 $IMAGE_TAG로 교체하라는 명령어입니다.
+        sed -i "s|image: .*$ECR_REPOSITORY:.*|image: $ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG|g" $WAS_YAML_PATH
         
-        echo "image=$ECR_REGISTRY/$ECR_REPOSITORY:latest" >> $GITHUB_OUTPUT
+        # 잘 바뀌었나 눈으로 확인 (로그에 찍힘)
+        cat $WAS_YAML_PATH
+
+    # 3. 수정된 YAML 파일을 Git에 자동 커밋 & 푸시 (ArgoCD가 이걸 보고 배포 시작)
+    - name: Commit and Push Updated YAML
+      uses: EndBug/add-and-commit@v9
+      with:
+        message: 'GitOps: Deploy new image version ${{ github.sha }}'
+        add: 'k8s/was-deployment.yaml'
