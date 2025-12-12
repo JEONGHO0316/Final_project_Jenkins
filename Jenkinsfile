@@ -5,7 +5,7 @@ pipeline {
         // 1. 환경 변수 설정
         AWS_REGION = 'ap-northeast-2'
         ECR_REGISTRY = '639242342449.dkr.ecr.ap-northeast-2.amazonaws.com'
-        ECR_REPOSITORY = 'petclinic-app'
+        ECR_REPOSITORY = 'jenkins'
         
         // 태그: 젠킨스 빌드 번호 사용 (v1, v2...)
         IMAGE_TAG = "v${BUILD_NUMBER}" 
