@@ -19,7 +19,7 @@ spec:
       containers:
       - name: petclinic
         # 업로드한 WAS 이미지 사용 
-        image: 639242342449.dkr.ecr.ap-northeast-2.amazonaws.com/petclinic-app:v8
+        image: 639242342449.dkr.ecr.ap-northeast-2.amazonaws.com/petclinic-app:v9
         imagePullPolicy: Always
         ports:
         - containerPort: 8080
